@@ -43,6 +43,7 @@ class TactileCaptioningModel(nn.Module):
         super().__init__()
         # Image encoder: ResNet18 without classifier
         resnet = models.resnet18(pretrained=True)
+        resnet.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
         resnet.fc = nn.Identity()
         self.encoder = resnet
 
@@ -78,14 +79,14 @@ class TLM:
         Pass in the X data (images) and y data (string of descriptions)
         Train the LLM
         """
-
+        X=torch.tensor(X).reshape(X.shape[0],1,X.shape[1],X.shape[2]).float()
         #convert text to embeddings
         tokenizer = AutoTokenizer.from_pretrained("t5-small")  # or "gpt2", etc.
-        text = y
+        """text = y
         tokenized = tokenizer(text, padding="max_length", truncation=True, return_tensors="pt")
         input_ids=tokenized['input_ids']
         decoded=tokenizer.decode(input_ids[0].squeeze(), skip_special_tokens=True)
-        y=decoded
+        y=decoded"""
         #train model
         self.model = TactileCaptioningModel(vocab_size=tokenizer.vocab_size)
         device = torch.device("cpu" if torch.cuda.is_available() else "cpu")
@@ -142,33 +143,44 @@ class TLM:
         pass
 
 if __name__=="__main__":
-    X = np.load("/its/home/drs25/Documents/data/Tactile Dataset/datasets/X_data_15.npz")['arr_0']
-    y = np.load("/its/home/drs25/Documents/data/Tactile Dataset/datasets/y_data_15.npz")['arr_0']
-    print(X)
+    import cv2
+    X = np.load("/mnt/data0/drs25/data/optical-tactile-dataset-for-textures/texture-tactip/X_data_15.npz")['arr_0'].astype(np.uint8)
+    y = np.load("/mnt/data0/drs25/data/optical-tactile-dataset-for-textures/texture-tactip/y_data_15.npz")['arr_0'].astype(np.uint8)
+    X=X[:,0:7,:,:]
+    X=X.reshape((len(X),X.shape[1]*X.shape[2],X.shape[3]))
+    print(X.shape)
+    def reshape(X,percent):
+        w=int(X.shape[1]*percent)
+        h=int(X.shape[2]*percent)
+        new_array=np.zeros((X.shape[0],w,h),dtype=np.uint8)
+        for i in range(X.shape[0]):
+            new_array[i] = cv2.resize(X[i],(h,w),interpolation=cv2.INTER_AREA)
+        return new_array
+    X=reshape(X,0.5)
     keys=['Carpet', 'LacedMatt', 'wool', 'Cork', 'Felt', 'LongCarpet', 'cotton', 'Plastic', 'Flat', 'Ffoam', 'Gfoam', 'bubble', 'Efoam', 'jeans', 'Leather']
     material_descriptions = {
-        "Carpet": "Dense, woven fibers, soft yet coarse, typically synthetic or wool blend.",
-        "LacedMatt": "Light, airy mesh structure with interwoven hard lace patterns; bumpy and flexible.",
-        "Wool": "Natural fiber, soft, warm, and slightly scratchy; high friction texture.",
-        "Cork": "Lightweight, firm but compressible, slightly rough with granular texture.",
-        "Felt": "Compressed fabric, soft and smooth surface, uniform texture with slight give.",
-        "LongCarpet": "High-pile carpet with long fibers, soft and plush, deep texture.",
-        "Cotton": "Smooth and soft woven fabric, breathable with moderate friction.",
-        "Plastic": "Hard, smooth surface with low friction; can vary from rigid to flexible.",
-        "Flat": "Smooth and even surface, minimal texture; likely hard or semi-soft material.",
-        "Ffoam": "Soft with slight springiness, absorbs pressure well.",
-        "Gfoam": "Grainy foam, slightly rougher texture, spongy and compressible.",
-        "Bubble": "Bubble wrap or bubbled plastic, soft with raised circular nodes, very bumpy.",
-        "Efoam": "Soft with slight springiness, absorbs pressure well.",
-        "Jeans": "Sturdy cotton denim, rough woven texture, moderate friction.",
-        "Leather": "Smooth and durable natural material, slightly soft with subtle grain."
+        "carpet": "Dense, woven fibers, soft yet coarse, typically synthetic or wool blend.",
+        "lacedmatt": "Light, airy mesh structure with interwoven hard lace patterns; bumpy and flexible.",
+        "wool": "Natural fiber, soft, warm, and slightly scratchy; high friction texture.",
+        "cork": "Lightweight, firm but compressible, slightly rough with granular texture.",
+        "felt": "Compressed fabric, soft and smooth surface, uniform texture with slight give.",
+        "longcarpet": "High-pile carpet with long fibers, soft and plush, deep texture.",
+        "cotton": "Smooth and soft woven fabric, breathable with moderate friction.",
+        "plastic": "Hard, smooth surface with low friction; can vary from rigid to flexible.",
+        "flat": "Smooth and even surface, minimal texture; likely hard or semi-soft material.",
+        "ffoam": "Soft with slight springiness, absorbs pressure well.",
+        "gfoam": "Grainy foam, slightly rougher texture, spongy and compressible.",
+        "bubble": "Bubble wrap or bubbled plastic, soft with raised circular nodes, very bumpy.",
+        "efoam": "Soft with slight springiness, absorbs pressure well.",
+        "jeans": "Sturdy cotton denim, rough woven texture, moderate friction.",
+        "leather": "Smooth and durable natural material, slightly soft with subtle grain."
     }
     new_y=[]
     for i in range(len(y)):
-        label=keys[y[i]]
+        label=keys[int(y[i])].lower()
         new_y.append(material_descriptions[label])
 
     #get model
     tlm = TLM()
     tlm.train(X,new_y)
-    tlm.generate_caption(X[0][0])
+    print("generated:",tlm.generate_caption(X[0][0]))
