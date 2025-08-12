@@ -43,6 +43,7 @@ class TactileCaptioningModel(nn.Module):
         super().__init__()
         # Image encoder: ResNet18 without classifier
         resnet = models.resnet18(pretrained=True)
+        resnet.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
         resnet.fc = nn.Identity()
         self.encoder = resnet
 
@@ -72,27 +73,26 @@ class TactileCaptioningModel(nn.Module):
         return self.output_layer(out)
 class TLM:
     def __init__(self):
-        pass
+        self.tokenizer=AutoTokenizer.from_pretrained("t5-small")
     def train(self,X,y):
         """
         Pass in the X data (images) and y data (string of descriptions)
         Train the LLM
         """
-
+        X=torch.tensor(X).reshape(X.shape[0],1,X.shape[1],X.shape[2]).float()
         #convert text to embeddings
-        tokenizer = AutoTokenizer.from_pretrained("t5-small")  # or "gpt2", etc.
-        text = y
+        """text = y
         tokenized = tokenizer(text, padding="max_length", truncation=True, return_tensors="pt")
         input_ids=tokenized['input_ids']
         decoded=tokenizer.decode(input_ids[0].squeeze(), skip_special_tokens=True)
-        y=decoded
+        y=decoded"""
         #train model
-        self.model = TactileCaptioningModel(vocab_size=tokenizer.vocab_size)
+        self.model = TactileCaptioningModel(vocab_size=self.tokenizer.vocab_size)
         device = torch.device("cpu" if torch.cuda.is_available() else "cpu")
         self.model.to(device)
         optimizer = torch.optim.Adam(self.model.parameters(), lr=1e-4)
-        loss_fn = nn.CrossEntropyLoss(ignore_index=tokenizer.pad_token_id)
-        dataset = TactileDataset(X, y, tokenizer)
+        loss_fn = nn.CrossEntropyLoss(ignore_index=self.tokenizer.pad_token_id)
+        dataset = TactileDataset(X, y, self.tokenizer)
         dataloader = DataLoader(dataset, batch_size=16, shuffle=True)
         for epoch in range(100): #train loop
             self.model.train()
@@ -101,15 +101,15 @@ class TLM:
                 images = batch["image"].to(device)
                 input_ids = batch["input_ids"].to(device)
                 outputs = self.model(images, input_ids[:, :-1])
-                loss = loss_fn(outputs.reshape(-1, tokenizer.vocab_size), input_ids[:, 1:].reshape(-1))
+                loss = loss_fn(outputs.reshape(-1, self.tokenizer.vocab_size), input_ids[:, 1:].reshape(-1))
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
                 total_loss += loss.item()
             print(f"Epoch {epoch}: Loss = {total_loss / len(dataloader):.4f}")
-    def generate_caption(self, image, tokenizer, max_len=30, device='cpu'):
+    def generate_caption(self, image, max_len=30, device='cpu'):
         self.model.eval()
-        image = image.to(device)
+        image = torch.tensor(image).to(device)
 
         with torch.no_grad():
             # Step 1: Encode image
@@ -117,7 +117,7 @@ class TLM:
             image_features = self.model.img_proj(image_features).unsqueeze(1).transpose(0, 1)  # (1, 1, embed_dim)
 
             # Step 2: Start decoding
-            input_ids = torch.tensor([[tokenizer.pad_token_id]], device=device)  # (1, 1)
+            input_ids = torch.tensor([[self.tokenizer.pad_token_id]], device=device)  # (1, 1)
 
             for _ in range(max_len):
                 tgt = self.model.embedding(input_ids)  # (1, T, E)
@@ -131,44 +131,69 @@ class TLM:
                 input_ids = torch.cat([input_ids, next_token_id.unsqueeze(0)], dim=1)
 
                 # Stop if EOS
-                if next_token_id.item() == tokenizer.eos_token_id:
+                if next_token_id.item() == self.tokenizer.eos_token_id:
                     break
 
-            decoded = tokenizer.decode(input_ids.squeeze(), skip_special_tokens=True)
+            decoded = self.tokenizer.decode(input_ids.squeeze(), skip_special_tokens=True)
             return decoded
-    def save(self,filename):
-        pass
-    def load(self,filename):
-        pass
+    def save(self, filename):
+        # Save model state dict
+        torch.save({
+            'model_state_dict': self.model.state_dict(),
+        }, filename)
+        print(f"Model saved to {filename}")
+
+    def load(self, filename, vocab_size):
+        # Create model instance with correct vocab size
+        self.model = TactileCaptioningModel(vocab_size=vocab_size)
+        device = torch.device("cpu" if torch.cuda.is_available() else "cpu")
+        self.model.to(device)
+
+        checkpoint = torch.load(filename, map_location=device)
+        self.model.load_state_dict(checkpoint['model_state_dict'])
+        self.model.eval()
+        print(f"Model loaded from {filename}")
 
 if __name__=="__main__":
-    X = np.load("/its/home/drs25/Documents/data/Tactile Dataset/datasets/X_data_15.npz")['arr_0']
-    y = np.load("/its/home/drs25/Documents/data/Tactile Dataset/datasets/y_data_15.npz")['arr_0']
-    print(X)
+    import cv2
+    X = np.load("/mnt/data0/drs25/data/optical-tactile-dataset-for-textures/texture-tactip/X_data_15.npz")['arr_0'].astype(np.uint8)
+    y = np.load("/mnt/data0/drs25/data/optical-tactile-dataset-for-textures/texture-tactip/y_data_15.npz")['arr_0'].astype(np.uint8)
+    X=X[:,0:7,:,:]
+    X=X.reshape((len(X),X.shape[1]*X.shape[2],X.shape[3]))
+    print(X.shape)
+    def reshape(X,percent):
+        w=int(X.shape[1]*percent)
+        h=int(X.shape[2]*percent)
+        new_array=np.zeros((X.shape[0],w,h),dtype=np.uint8)
+        for i in range(X.shape[0]):
+            new_array[i] = cv2.resize(X[i],(h,w),interpolation=cv2.INTER_AREA)
+        return new_array
+    X=reshape(X,0.5)
     keys=['Carpet', 'LacedMatt', 'wool', 'Cork', 'Felt', 'LongCarpet', 'cotton', 'Plastic', 'Flat', 'Ffoam', 'Gfoam', 'bubble', 'Efoam', 'jeans', 'Leather']
     material_descriptions = {
-        "Carpet": "Dense, woven fibers, soft yet coarse, typically synthetic or wool blend.",
-        "LacedMatt": "Light, airy mesh structure with interwoven hard lace patterns; bumpy and flexible.",
-        "Wool": "Natural fiber, soft, warm, and slightly scratchy; high friction texture.",
-        "Cork": "Lightweight, firm but compressible, slightly rough with granular texture.",
-        "Felt": "Compressed fabric, soft and smooth surface, uniform texture with slight give.",
-        "LongCarpet": "High-pile carpet with long fibers, soft and plush, deep texture.",
-        "Cotton": "Smooth and soft woven fabric, breathable with moderate friction.",
-        "Plastic": "Hard, smooth surface with low friction; can vary from rigid to flexible.",
-        "Flat": "Smooth and even surface, minimal texture; likely hard or semi-soft material.",
-        "Ffoam": "Soft with slight springiness, absorbs pressure well.",
-        "Gfoam": "Grainy foam, slightly rougher texture, spongy and compressible.",
-        "Bubble": "Bubble wrap or bubbled plastic, soft with raised circular nodes, very bumpy.",
-        "Efoam": "Soft with slight springiness, absorbs pressure well.",
-        "Jeans": "Sturdy cotton denim, rough woven texture, moderate friction.",
-        "Leather": "Smooth and durable natural material, slightly soft with subtle grain."
+        "carpet": "Dense, woven fibers, soft yet coarse, typically synthetic or wool blend.",
+        "lacedmatt": "Light, airy mesh structure with interwoven hard lace patterns; bumpy and flexible.",
+        "wool": "Natural fiber, soft, warm, and slightly scratchy; high friction texture.",
+        "cork": "Lightweight, firm but compressible, slightly rough with granular texture.",
+        "felt": "Compressed fabric, soft and smooth surface, uniform texture with slight give.",
+        "longcarpet": "High-pile carpet with long fibers, soft and plush, deep texture.",
+        "cotton": "Smooth and soft woven fabric, breathable with moderate friction.",
+        "plastic": "Hard, smooth surface with low friction; can vary from rigid to flexible.",
+        "flat": "Smooth and even surface, minimal texture; likely hard or semi-soft material.",
+        "ffoam": "Soft with slight springiness, absorbs pressure well.",
+        "gfoam": "Grainy foam, slightly rougher texture, spongy and compressible.",
+        "bubble": "Bubble wrap or bubbled plastic, soft with raised circular nodes, very bumpy.",
+        "efoam": "Soft with slight springiness, absorbs pressure well.",
+        "jeans": "Sturdy cotton denim, rough woven texture, moderate friction.",
+        "leather": "Smooth and durable natural material, slightly soft with subtle grain."
     }
     new_y=[]
     for i in range(len(y)):
-        label=keys[y[i]]
+        label=keys[int(y[i])].lower()
         new_y.append(material_descriptions[label])
 
     #get model
     tlm = TLM()
     tlm.train(X,new_y)
-    tlm.generate_caption(X[0][0])
+    tlm.save("/its/home/drs25/Tactile_Language_Model/data/trainedModel")
+    print("generated:",tlm.generate_caption(X[0][0]),tlm.tokenizer)
