@@ -74,7 +74,7 @@ class TactileCaptioningModel(nn.Module):
 class TLM:
     def __init__(self):
         self.tokenizer=AutoTokenizer.from_pretrained("t5-small")
-    def train(self,X,y):
+    def train(self,X,y,epochs=100):
         """
         Pass in the X data (images) and y data (string of descriptions)
         Train the LLM
@@ -94,7 +94,7 @@ class TLM:
         loss_fn = nn.CrossEntropyLoss(ignore_index=self.tokenizer.pad_token_id)
         dataset = TactileDataset(X, y, self.tokenizer)
         dataloader = DataLoader(dataset, batch_size=16, shuffle=True)
-        for epoch in range(100): #train loop
+        for epoch in range(epochs): #train loop
             self.model.train()
             total_loss = 0
             for batch in dataloader:
