@@ -12,6 +12,15 @@ This library was developed and tested in Python 3.10.12 and uses the following l
 - torchvision
 - ollama
 
+Optional 
+- sentence-transformers
+
+You wil need to <a href="">install ollama</a>
+```bash
+curl -fsSL https://ollama.com/install.sh | sh
+ollama pull mistral
+
+```
 ## Citation 
 
 ```BibTeX
