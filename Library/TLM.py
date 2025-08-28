@@ -15,6 +15,7 @@ import torch.nn as nn
 import torchvision.models as models
 from torch.utils.data import DataLoader
 import torch
+from ollama import chat
 class TactileDataset(Dataset):
     def __init__(self, images, captions, tokenizer, max_len=30):
         self.images = images
@@ -153,6 +154,27 @@ class TLM:
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.model.eval()
         print(f"Model loaded from {filename}")
+
+class Decisions:
+    def __init__(self,model="mistral"):
+        self.MODEL=model
+    def chat(self,reading):
+        usermessage="Act like you are a quadruped robot with tactile sensors. Simply tell me how would you adjust your gait based on the tactile sensor reading:"+str(reading)+". Give your answer in the format where you pick one of the functions as an option 'speed action: [slowSpeed(), maintainSpeed(), increaseSpeed()] \nleg spread action: [widenLegStride(), maintainLegSTride(), increaseLegStride()] \nbody centre action [lowerBody(), maintainBody(), IncreaseBody()]'"
+        response = requests.post(
+            "http://localhost:11434/api/generate",
+            json={
+                "model": self.MODEL,
+                "prompt": usermessage,
+                "stream": False  # change to True for word-by-word streaming
+            }
+        )
+        reply = ""
+        if response.ok:
+            reply = response.json()["response"]
+        else:
+            print("Error communicating with Ollama:", response.text)
+        return reply
+
 
 if __name__=="__main__":
     import cv2
