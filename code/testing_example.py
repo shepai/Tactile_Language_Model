@@ -11,13 +11,9 @@ with open("/mnt/data0/drs25/data/gelsight_language/y_data.pkl", "rb") as file:
 
 print(X.shape)
 print(len(y))
-train_X=X[0:len(X)//2]
-train_y=y[0:len(y)//2]
-del X
-del y
+
 tlm = TLM()
-tlm.train(train_X,train_y,epochs=10,save="/its/home/drs25/Tactile_Language_Model/data/gelsight_model_10")
-#tlm.save("/its/home/drs25/Tactile_Language_Model/data/gelsight_model_10")
+tlm.load("/its/home/drs25/Tactile_Language_Model/data/gelsight_model")
 image=X[0].reshape((1,1,*X[0].shape))
 print(image.shape)
 print("generated:",tlm.generate_caption(image))
