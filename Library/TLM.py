@@ -75,7 +75,7 @@ class TactileCaptioningModel(nn.Module):
 class TLM:
     def __init__(self):
         self.tokenizer=AutoTokenizer.from_pretrained("t5-small")
-    def train(self,X,y,epochs=100):
+    def train(self,X,y,epochs=100,save="",lr=1e-4):
         """
         Pass in the X data (images) and y data (string of descriptions)
         Train the LLM
@@ -89,9 +89,9 @@ class TLM:
         y=decoded"""
         #train model
         self.model = TactileCaptioningModel(vocab_size=self.tokenizer.vocab_size)
-        device = torch.device("cpu" if torch.cuda.is_available() else "cpu")
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model.to(device)
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=1e-4)
+        optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
         loss_fn = nn.CrossEntropyLoss(ignore_index=self.tokenizer.pad_token_id)
         dataset = TactileDataset(X, y, self.tokenizer)
         dataloader = DataLoader(dataset, batch_size=16, shuffle=True)
@@ -107,10 +107,12 @@ class TLM:
                 loss.backward()
                 optimizer.step()
                 total_loss += loss.item()
+            if save!="":
+                self.save(save)
             print(f"Epoch {epoch}: Loss = {total_loss / len(dataloader):.4f}")
     def generate_caption(self, image, max_len=30, device='cpu'):
         self.model.eval()
-        image = torch.tensor(image).to(device)
+        image = torch.tensor(image).to(device).float()
 
         with torch.no_grad():
             # Step 1: Encode image
@@ -126,8 +128,13 @@ class TLM:
 
                 output = self.model.transformer_decoder(tgt, image_features)  # (T, 1, E)
                 last_token_logits = self.model.output_layer(output[-1])       # (1, vocab_size)
-                next_token_id = torch.argmax(last_token_logits, dim=-1)  # (1,)
-
+                probs= torch.softmax(last_token_logits, dim=-1)  # (1,)
+                k = 50
+                topk_probs, topk_indices = torch.topk(probs, k, dim=-1)  # (1, k)
+                topk_probs = topk_probs / topk_probs.sum(dim=-1, keepdim=True)
+                sample_idx = torch.multinomial(topk_probs, num_samples=1)
+                next_token_id = topk_indices.gather(-1, sample_idx) 
+                next_token_id = next_token_id.squeeze(1)
                 # Append to sequence
                 input_ids = torch.cat([input_ids, next_token_id.unsqueeze(0)], dim=1)
 
@@ -144,9 +151,9 @@ class TLM:
         }, filename)
         print(f"Model saved to {filename}")
 
-    def load(self, filename, vocab_size):
+    def load(self, filename):
         # Create model instance with correct vocab size
-        self.model = TactileCaptioningModel(vocab_size=vocab_size)
+        self.model = TactileCaptioningModel(vocab_size=self.tokenizer.vocab_size)
         device = torch.device("cpu" if torch.cuda.is_available() else "cpu")
         self.model.to(device)
 
@@ -158,8 +165,11 @@ class TLM:
 class Decisions:
     def __init__(self,model="mistral"):
         self.MODEL=model
+        self.usermessage="Act like you are a quadruped robot with tactile sensors. Simply tell me how would you adjust your gait based on the tactile sensor reading: READING. Give your answer in the format where you pick one of the functions as an option 'speed action: [slowSpeed(), maintainSpeed(), increaseSpeed()] \nleg spread action: [widenLegStride(), maintainLegSTride(), increaseLegStride()] \nbody centre action [lowerBody(), maintainBody(), IncreaseBody()]'"
+        self.conceptusermessage="Act like you are a quadruped robot with tactile sensors. Simply tell me how would you adjust your gait based on the tactile sensor reading: READING. Give your answer in the format where you pick one of the functions as an option 'speed action: ... \nleg spread action: ... \nbody centre action ...'"
+
     def chat(self,reading):
-        usermessage="Act like you are a quadruped robot with tactile sensors. Simply tell me how would you adjust your gait based on the tactile sensor reading:"+str(reading)+". Give your answer in the format where you pick one of the functions as an option 'speed action: [slowSpeed(), maintainSpeed(), increaseSpeed()] \nleg spread action: [widenLegStride(), maintainLegSTride(), increaseLegStride()] \nbody centre action [lowerBody(), maintainBody(), IncreaseBody()]'"
+        usermessage=self.usermessage.replace("READING",reading)
         response = requests.post(
             "http://localhost:11434/api/generate",
             json={
@@ -174,6 +184,7 @@ class Decisions:
         else:
             print("Error communicating with Ollama:", response.text)
         return reply
+
 
 
 if __name__=="__main__":
