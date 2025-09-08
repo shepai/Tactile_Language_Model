@@ -62,28 +62,21 @@ import json
 with open("/its/home/drs25/Tactile_Language_Model/data/floor_descriptions.json","r", encoding="utf-8-sig") as f:
     floor_des=json.load(f)
 def runExperiment(textureNum,generations=100,delay=0,fitness=fitness_,control=False,fric=0.5,model="gemma3"):
-    #load in LLM prediction
-    
-    #activate those LLM functions before run
     index=np.argmax(fitnesses)
-    env=environment(record=0,floorpath="/its/home/drs25/Terrain_generator_3D/assets/tactile"+str(textureNum)+".urdf",friction=fric) #
+    if textureNum>=0:
+        env=environment(record=0,floorpath="/its/home/drs25/Terrain_generator_3D/assets/tactile"+str(textureNum)+".urdf",friction=fric) #
+    else:
+        env=environment(record=0,friction=fric) #
+
     photos=-1
     agent=population[index]
-
-    history={}
-    history['positions']=[]
-    history['orientations']=[]
-    history['motors']=[]
-    history['accumalitive_reward']=[]
-    history['self_collisions']=[]
-    history['feet']=[]
     env.reset()
-    a=[]
-    photos_l=[]
-    d=Decisions(model)
-    prompt = d.chat(floor_des[str(textureNum)]+" and the lateral coefficient friction is "+ "high" if fric>0.4 else "low")
+    d=Decisions(model)#load in LLM prediction
+    prompt = d.chat(floor_des[str(textureNum)]+" and the lateral coefficient friction is "+ "high" if fric>0.4 else "low")#activate those LLM functions before run
     if control: #predetermined LLM outputs
-        pass
+        maintainSpeed(agent) 
+        maintainLegStride(env)
+        maintainBody(env)
     else:
         if "maintainspeed" in prompt.lower():
             maintainSpeed(agent) 
@@ -113,6 +106,24 @@ def runExperiment(textureNum,generations=100,delay=0,fitness=fitness_,control=Fa
             maintainBody(env)
             print("\tMaintain body")
     
+    history=run(env,generations,delay,agent,photos,fitness)
+    #np.save("/its/home/drs25/Documents/GitHub/Quadruped/Code/data_collect_proj/trials_all/"+str(filename),history)
+    env.stop()
+    #np.savez(datapath+"/Code/GAs/test",history,allow_pickle=True)
+
+    #np.save("/its/home/drs25/Tactile_Language_Model/code/__pycache__/photos",np.array(photos_l))
+    return history
+
+def run(env,generations,delay,agent,photos,fitness):
+    a=[]
+    photos_l=[]
+    history={}
+    history['positions']=[]
+    history['orientations']=[]
+    history['motors']=[]
+    history['accumalitive_reward']=[]
+    history['self_collisions']=[]
+    history['feet']=[]
     for i in range(generations*10):
         pos=env.step(agent,0,delay=delay)
         if photos>-1 and i%photos==0:
@@ -139,18 +150,40 @@ def runExperiment(textureNum,generations=100,delay=0,fitness=fitness_,control=Fa
     history['self_collisions']=np.array(history['self_collisions'])
     history['feet']=np.array(history['feet'])
     filename = str(uuid.uuid4())
-    #np.save("/its/home/drs25/Documents/GitHub/Quadruped/Code/data_collect_proj/trials_all/"+str(filename),history)
-    env.stop()
-    #np.savez(datapath+"/Code/GAs/test",history,allow_pickle=True)
-
-    #np.save("/its/home/drs25/Tactile_Language_Model/code/__pycache__/photos",np.array(photos_l))
     return history
-models=["mistral","gemma3","gpt-oss","llama3.1","deepseek-r1"]
-model="llamas3.1"
+def testAll(generations=100,delay=0,fitness=fitness_,control=False,fric=0.5):
+    speed=[maintainSpeed,increaseSpeed,decreaseSpeed]
+    body=[maintainBody,increaseBody,increaseBody]
+    stride=[maintainLegStride,widenLegStride,decreaseLegStride]
+    index=np.argmax(fitnesses)
+    
+    env=environment(record=0,friction=fric) #
+    photos=-1
+    agent=population[index]
+    env.reset()
+    
+    env.stop()
+    for i,sp in enumerate(speed):
+        for j,bo in enumerate(body):
+            for k,st in enumerate(stride):
+                print(i,j,k)
+                sp(agent)
+                bo(env)
+                st(env)
+                history=run(env,generations,delay,agent,photos,fitness)
+                np.savez("/its/home/drs25/Tactile_Language_Model/data/quadruped/"+str(i)+"_"+str(j)+"_"+str(k),history,allow_pickle=True)
+
+    return history
+    
+
 if __name__=="__main__":
-    for i in range(7):
-        print("experiment",i)
-        hist=runExperiment(i,delay=0,fric=0.5,model=model)
-        np.savez("/its/home/drs25/Tactile_Language_Model/data/quadruped/"+model+"_hist_0.5_"+str(i),hist,allow_pickle=True)
-        hist=runExperiment(i,delay=0,control=True,fric=0.5,model=model)
-        np.savez("/its/home/drs25/Tactile_Language_Model/data/quadruped/"+model+"_control_0.5_"+str(i),hist,allow_pickle=True)
+    testAll()
+    """models=["mistral","gemma3","gpt-oss","llama3.1"] #,"deepseek-r1"
+    for model in models:
+        for i in range(7):
+            for j in range(10):
+                print("experiment",i)
+                hist=runExperiment(i,delay=0,fric=0.05,model=model)
+                np.savez("/its/home/drs25/Tactile_Language_Model/data/quadruped/"+model+"_hist_0.5_"+str(i)+"_"+str(j)+"_low",hist,allow_pickle=True)
+                hist=runExperiment(i,delay=0,control=True,fric=0.05,model=model)
+                np.savez("/its/home/drs25/Tactile_Language_Model/data/quadruped/"+model+"_control_0.5_"+str(i)+"_"+str(j)+"_low",hist,allow_pickle=True)"""
