@@ -2,13 +2,14 @@ if __name__=="__main__":
     import sys
     #sys.path.insert(1, '/its/home/drs25/Documents/GitHub/Quadruped/Code')
     sys.path.insert(1, '/its/home/drs25/Quadruped/Code')
+    sys.path.insert(1, '/its/home/drs25/Tactile_Language_Model/Library')
     #sys.path.insert(1, 'C:/Users/dexte/Documents/GitHub/Quadruped/Code')
 datapath="/its/home/drs25/Quadruped/"
 
 from environment import *
 from CPG import CTRNNQuadruped
 import pickle
-
+from TLM import Decisions
 with open(datapath+'/models/6_neurons/genotypes_dt0.1__6_neurons_0_F10.5.pkl', 'rb') as f:
     population = pickle.load(f)
 fitnesses=np.load(datapath+"/models/6_neurons/fitnesses_dt0.1__6_neurons_0_F10.5.npy")
@@ -37,7 +38,7 @@ def euclidean_distance(point1, point2):
 
 def increaseSpeed(geno):
     geno.dt=0.5
-def slowSpeed(geno):
+def decreaseSpeed(geno):
     geno.dt=0.01
 def increaseBody(env):
     env.INCREASE=10
@@ -57,12 +58,15 @@ def maintainLegStride(env):
 def decreaseLegStride(env):
     env.stide=0.5
 
-def runExperiment(textureNum,generations=100,delay=0,fitness=fitness_,control=False):
+import json 
+with open("/its/home/drs25/Tactile_Language_Model/data/floor_descriptions.json","r", encoding="utf-8-sig") as f:
+    floor_des=json.load(f)
+def runExperiment(textureNum,generations=100,delay=0,fitness=fitness_,control=False,fric=0.5,model="gemma3"):
     #load in LLM prediction
     
     #activate those LLM functions before run
     index=np.argmax(fitnesses)
-    env=environment(record=0,floorpath="/its/home/drs25/Terrain_generator_3D/assets/tactile"+str(textureNum)+".urdf") #
+    env=environment(record=0,floorpath="/its/home/drs25/Terrain_generator_3D/assets/tactile"+str(textureNum)+".urdf",friction=fric) #
     photos=-1
     agent=population[index]
 
@@ -76,36 +80,39 @@ def runExperiment(textureNum,generations=100,delay=0,fitness=fitness_,control=Fa
     env.reset()
     a=[]
     photos_l=[]
+    d=Decisions(model)
+    prompt = d.chat(floor_des[str(textureNum)]+" and the lateral coefficient friction is "+ "high" if fric>0.4 else "low")
     if control: #predetermined LLM outputs
         pass
-    elif textureNum==0:
-        maintainSpeed(agent)
-        widenLegStride(env)
-        lowerBody(env)
-    elif textureNum==1:
-        maintainSpeed(agent)
-        widenLegStride(env)
-        maintainBody(env)
-    elif textureNum==2:
-        maintainSpeed(agent)
-        widenLegStride(env)
-        lowerBody(env)
-    elif textureNum==3:
-        increaseSpeed(agent)
-        maintainLegStride(env)
-        lowerBody(env)
-    elif textureNum==4:
-        increaseSpeed(agent)
-        maintainLegStride(env)
-        maintainBody(env)
-    elif textureNum==5:
-        slowSpeed(agent)
-        widenLegStride(env)
-        lowerBody(env)
-    elif textureNum==6:
-        maintainSpeed(agent)
-        widenLegStride(env)
-        lowerBody(env)
+    else:
+        if "maintainspeed" in prompt.lower():
+            maintainSpeed(agent) 
+            print("\tMaintain speed")
+        elif "increasespeed" in prompt.lower():
+            increaseSpeed(agent)
+            print("\tIncrease speed")
+        elif "decreasespeed" in prompt.lower():
+            decreaseSpeed(agent)
+            print("\tDecrease speed")
+        if "widenlegstride" in prompt.lower() or "increaselegstride" in prompt.lower():
+            widenLegStride(env)
+            print("\tWiden stride")
+        elif "decreaselegstride" in prompt.lower(): 
+            decreaseLegStride(env)
+            print("\tDecrease stride")
+        elif "maintainlegstride" in prompt.lower():
+            maintainLegStride(env)
+            print("\tMaintain stride")
+        if "lowerbody" in prompt.lower():
+            lowerBody(env)
+            print("\tLower body")
+        elif "increasebody" in prompt.lower():
+            increaseBody(env)
+            print("\tIncrease body")
+        elif "maintainbody" in prompt.lower():
+            maintainBody(env)
+            print("\tMaintain body")
+    
     for i in range(generations*10):
         pos=env.step(agent,0,delay=delay)
         if photos>-1 and i%photos==0:
@@ -138,11 +145,12 @@ def runExperiment(textureNum,generations=100,delay=0,fitness=fitness_,control=Fa
 
     #np.save("/its/home/drs25/Tactile_Language_Model/code/__pycache__/photos",np.array(photos_l))
     return history
-
+models=["mistral","gemma3","gpt-oss","llama3.1","deepseek-r1"]
+model="llamas3.1"
 if __name__=="__main__":
     for i in range(7):
         print("experiment",i)
-        hist=runExperiment(i,delay=0)
-        np.savez("/its/home/drs25/Tactile_Language_Model/data/hist_"+str(i),hist,allow_pickle=True)
-        hist=runExperiment(i,delay=0,control=True)
-        np.savez("/its/home/drs25/Tactile_Language_Model/data/hist_control_"+str(i),hist,allow_pickle=True)
+        hist=runExperiment(i,delay=0,fric=0.5,model=model)
+        np.savez("/its/home/drs25/Tactile_Language_Model/data/quadruped/"+model+"_hist_0.5_"+str(i),hist,allow_pickle=True)
+        hist=runExperiment(i,delay=0,control=True,fric=0.5,model=model)
+        np.savez("/its/home/drs25/Tactile_Language_Model/data/quadruped/"+model+"_control_0.5_"+str(i),hist,allow_pickle=True)
