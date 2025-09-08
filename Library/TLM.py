@@ -16,6 +16,8 @@ import torchvision.models as models
 from torch.utils.data import DataLoader
 import torch
 from ollama import chat
+import requests
+from ollama import ChatResponse
 class TactileDataset(Dataset):
     def __init__(self, images, captions, tokenizer, max_len=30):
         self.images = images
