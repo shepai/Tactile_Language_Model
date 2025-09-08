@@ -165,7 +165,7 @@ class TLM:
 class Decisions:
     def __init__(self,model="mistral"):
         self.MODEL=model
-        self.usermessage="Act like you are a quadruped robot with tactile sensors. Simply tell me how would you adjust your gait based on the tactile sensor reading: READING. Give your answer in the format where you pick one of the functions as an option 'speed action: [slowSpeed(), maintainSpeed(), increaseSpeed()] \nleg spread action: [widenLegStride(), maintainLegSTride(), increaseLegStride()] \nbody centre action [lowerBody(), maintainBody(), IncreaseBody()]'"
+        self.usermessage="Act like you are a quadruped robot with tactile sensors. Simply tell me how would you adjust your gait based on the tactile sensor reading: READING. Give your answer in the format where you pick one of the functions as an option 'speed action: [slowSpeed(), maintainSpeed(), increaseSpeed()] \nleg spread action: [decreaseLegStride(), maintainLegSTride(), increaseLegStride()] \nbody centre action [lowerBody(), maintainBody(), IncreaseBody()]'"
         self.conceptusermessage="Act like you are a quadruped robot with tactile sensors. Simply tell me how would you adjust your gait based on the tactile sensor reading: READING. Give your answer in the format where you pick one of the functions as an option 'speed action: ... \nleg spread action: ... \nbody centre action ...'"
 
     def chat(self,reading):
