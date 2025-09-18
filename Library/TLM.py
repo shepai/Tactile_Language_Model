@@ -17,9 +17,9 @@ from torch.utils.data import DataLoader
 import torch
 from ollama import chat
 import requests
-from ollama import ChatResponse
+import re
 class TactileDataset(Dataset):
-    def __init__(self, images, captions, tokenizer, max_len=30):
+    def __init__(self, images, captions, tokenizer, max_len=300):
         self.images = images
         self.tokenizer = tokenizer
         self.max_len = max_len
@@ -77,6 +77,7 @@ class TactileCaptioningModel(nn.Module):
 class TLM:
     def __init__(self):
         self.tokenizer=AutoTokenizer.from_pretrained("t5-small")
+        self.model = TactileCaptioningModel(vocab_size=self.tokenizer.vocab_size)
     def train(self,X,y,epochs=100,save="",lr=1e-4):
         """
         Pass in the X data (images) and y data (string of descriptions)
@@ -90,7 +91,7 @@ class TLM:
         decoded=tokenizer.decode(input_ids[0].squeeze(), skip_special_tokens=True)
         y=decoded"""
         #train model
-        self.model = TactileCaptioningModel(vocab_size=self.tokenizer.vocab_size)
+        
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model.to(device)
         optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
@@ -112,8 +113,10 @@ class TLM:
             if save!="":
                 self.save(save)
             print(f"Epoch {epoch}: Loss = {total_loss / len(dataloader):.4f}")
-    def generate_caption(self, image, max_len=30, device='cpu'):
+    def generate_caption(self, image, max_len=300, device='cuda'):
+        self.model.to(device)
         self.model.eval()
+        image=image.permute(0,3,1,2)
         image = torch.tensor(image).to(device).float()
 
         with torch.no_grad():
@@ -122,7 +125,8 @@ class TLM:
             image_features = self.model.img_proj(image_features).unsqueeze(1).transpose(0, 1)  # (1, 1, embed_dim)
 
             # Step 2: Start decoding
-            input_ids = torch.tensor([[self.tokenizer.pad_token_id]], device=device)  # (1, 1)
+            first_token_id = self.tokenizer.convert_tokens_to_ids('{')
+            input_ids = torch.tensor([[first_token_id]], device=device)  # (1, 1)
 
             for _ in range(max_len):
                 tgt = self.model.embedding(input_ids)  # (1, T, E)
@@ -136,7 +140,44 @@ class TLM:
                 topk_probs = topk_probs / topk_probs.sum(dim=-1, keepdim=True)
                 sample_idx = torch.multinomial(topk_probs, num_samples=1)
                 next_token_id = topk_indices.gather(-1, sample_idx) 
-                next_token_id = next_token_id.squeeze(1)
+                next_token_id = next_token_id.squeeze(1).to(device)
+                next_token_id = torch.argmax(last_token_logits, dim=-1)
+                # Append to sequence
+                input_ids = torch.cat([input_ids, next_token_id.unsqueeze(0)], dim=1)
+
+                # Stop if EOS
+                if next_token_id.item() == self.tokenizer.eos_token_id:
+                    break
+
+            decoded = self.tokenizer.decode(input_ids.squeeze(), skip_special_tokens=True)
+            return decoded
+    def generate_caption_nongreedy(self, image, max_len=300, device='cuda'):
+        self.model.to(device)
+        self.model.eval()
+        image=image.permute(0,3,1,2)
+        image = torch.tensor(image).to(device).float()
+
+        with torch.no_grad():
+            # Step 1: Encode image
+            image_features = self.model.encoder(image)  # (1, 512)
+            image_features = self.model.img_proj(image_features).unsqueeze(1).transpose(0, 1)  # (1, 1, embed_dim)
+
+            # Step 2: Start decoding
+            first_token_id = self.tokenizer.convert_tokens_to_ids('{')
+            input_ids = torch.tensor([[first_token_id]], device=device)  # (1, 1)
+
+            for _ in range(max_len):
+                tgt = self.model.embedding(input_ids)  # (1, T, E)
+                tgt = tgt.transpose(0, 1)         # (T, 1, E)
+
+                output = self.model.transformer_decoder(tgt, image_features)  # (T, 1, E)
+                last_token_logits = self.model.output_layer(output[-1])       # (1, vocab_size)
+                probs = torch.softmax(last_token_logits, dim=-1)          # (1, vocab_size)
+                k = 50
+                topk_probs, topk_indices = torch.topk(probs, k, dim=-1)   # pick top-k tokens
+                topk_probs = topk_probs / topk_probs.sum(dim=-1, keepdim=True)
+                sample_idx = torch.multinomial(topk_probs, num_samples=1) # sample one token
+                next_token_id = topk_indices.gather(-1, sample_idx).squeeze(1).to(device)
                 # Append to sequence
                 input_ids = torch.cat([input_ids, next_token_id.unsqueeze(0)], dim=1)
 
@@ -156,7 +197,7 @@ class TLM:
     def load(self, filename):
         # Create model instance with correct vocab size
         self.model = TactileCaptioningModel(vocab_size=self.tokenizer.vocab_size)
-        device = torch.device("cpu" if torch.cuda.is_available() else "cpu")
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model.to(device)
 
         checkpoint = torch.load(filename, map_location=device)
@@ -191,44 +232,11 @@ class Decisions:
 
 if __name__=="__main__":
     import cv2
-    X = np.load("/mnt/data0/drs25/data/optical-tactile-dataset-for-textures/texture-tactip/X_data_15.npz")['arr_0'].astype(np.uint8)
-    y = np.load("/mnt/data0/drs25/data/optical-tactile-dataset-for-textures/texture-tactip/y_data_15.npz")['arr_0'].astype(np.uint8)
-    X=X[:,0:7,:,:]
-    X=X.reshape((len(X),X.shape[1]*X.shape[2],X.shape[3]))
-    print(X.shape)
-    def reshape(X,percent):
-        w=int(X.shape[1]*percent)
-        h=int(X.shape[2]*percent)
-        new_array=np.zeros((X.shape[0],w,h),dtype=np.uint8)
-        for i in range(X.shape[0]):
-            new_array[i] = cv2.resize(X[i],(h,w),interpolation=cv2.INTER_AREA)
-        return new_array
-    X=reshape(X,0.5)
-    keys=['Carpet', 'LacedMatt', 'wool', 'Cork', 'Felt', 'LongCarpet', 'cotton', 'Plastic', 'Flat', 'Ffoam', 'Gfoam', 'bubble', 'Efoam', 'jeans', 'Leather']
-    material_descriptions = {
-        "carpet": "Dense, woven fibers, soft yet coarse, typically synthetic or wool blend.",
-        "lacedmatt": "Light, airy mesh structure with interwoven hard lace patterns; bumpy and flexible.",
-        "wool": "Natural fiber, soft, warm, and slightly scratchy; high friction texture.",
-        "cork": "Lightweight, firm but compressible, slightly rough with granular texture.",
-        "felt": "Compressed fabric, soft and smooth surface, uniform texture with slight give.",
-        "longcarpet": "High-pile carpet with long fibers, soft and plush, deep texture.",
-        "cotton": "Smooth and soft woven fabric, breathable with moderate friction.",
-        "plastic": "Hard, smooth surface with low friction; can vary from rigid to flexible.",
-        "flat": "Smooth and even surface, minimal texture; likely hard or semi-soft material.",
-        "ffoam": "Soft with slight springiness, absorbs pressure well.",
-        "gfoam": "Grainy foam, slightly rougher texture, spongy and compressible.",
-        "bubble": "Bubble wrap or bubbled plastic, soft with raised circular nodes, very bumpy.",
-        "efoam": "Soft with slight springiness, absorbs pressure well.",
-        "jeans": "Sturdy cotton denim, rough woven texture, moderate friction.",
-        "leather": "Smooth and durable natural material, slightly soft with subtle grain."
-    }
-    new_y=[]
-    for i in range(len(y)):
-        label=keys[int(y[i])].lower()
-        new_y.append(material_descriptions[label])
+    X=torch.rand(100,100,100,1)
+    y=["{json\n\"test\":\"test\"}" for i in range(100)]
 
     #get model
     tlm = TLM()
-    tlm.train(X,new_y)
-    tlm.save("/its/home/drs25/Tactile_Language_Model/data/trainedModel")
-    print("generated:",tlm.generate_caption(X[0][0]),tlm.tokenizer)
+    #tlm.train(X,y,epochs=200)
+    tlm.load("/its/home/drs25/Tactile_Language_Model/data/models/test")
+    print("generated:",tlm.generate_caption(X[0:1]))
