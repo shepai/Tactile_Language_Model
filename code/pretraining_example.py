@@ -42,7 +42,7 @@ def generate_dataset(num_samples=10,
         json_obj = random_flat_json(num_keys=num_keys)
         img_array = random_noise_image(image_size)
         X.append(img_array)
-        y.append(str(json_obj))
+        y.append("json "+str(json_obj))
     return np.array(X),y
 
 X,y = generate_dataset(num_samples=8000)
@@ -93,7 +93,7 @@ test_y  = y[len(y)//4:]
 
 del y
 tlm = TLM()
-tlm.train(train_X,train_y,epochs=5000,save="/its/home/drs25/Tactile_Language_Model/data/models/transferlearning")
+tlm.train(train_X,train_y,epochs=5000,save="/its/home/drs25/Tactile_Language_Model/data/models/pretrained_json2")
 #tlm.save("/its/home/drs25/Tactile_Language_Model/data/gelsight_model_10")
 image=X[0].reshape((1,1,*X[0].shape))
 print(image.shape)

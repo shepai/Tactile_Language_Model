@@ -37,9 +37,9 @@ def euclidean_distance(point1, point2):
     return np.sqrt(np.sum((np.array(point1) - np.array(point2)) ** 2,axis=1))
 
 def increaseSpeed(geno):
-    geno.dt=0.5
+    geno.tau=geno.tau*0.001
 def decreaseSpeed(geno):
-    geno.dt=0.01
+    geno.tau=geno.tau*10000
 def increaseBody(env):
     env.INCREASE=10
     env.BALANCE=-10
@@ -47,7 +47,7 @@ def lowerBody(env):
     env.INCREASE=-30
     env.BALANCE=30
 def maintainSpeed(geno):
-    geno.dt=0.1
+    geno.tau=geno.tau
 def maintainBody(env):
     env.INCREASE=0
     env.BALANCE=0
@@ -151,39 +151,42 @@ def run(env,generations,delay,agent,photos,fitness):
     history['feet']=np.array(history['feet'])
     filename = str(uuid.uuid4())
     return history
-def testAll(generations=100,delay=0,fitness=fitness_,control=False,fric=0.5):
+def testAll(generations=100,delay=0,fitness=fitness_,control=False,fric=0.9,exture="1"):
     speed=[maintainSpeed,increaseSpeed,decreaseSpeed]
     body=[maintainBody,increaseBody,increaseBody]
     stride=[maintainLegStride,widenLegStride,decreaseLegStride]
     index=np.argmax(fitnesses)
     
-    env=environment(record=0,friction=fric) #
+    env=environment(record=0,floorpath="/its/home/drs25/Terrain_generator_3D/assets/tactile"+exture+".urdf",friction=fric) #
     photos=-1
     agent=population[index]
     env.reset()
     
     env.stop()
-    for i,sp in enumerate(speed):
-        for j,bo in enumerate(body):
-            for k,st in enumerate(stride):
-                print(i,j,k)
-                sp(agent)
-                bo(env)
-                st(env)
-                history=run(env,generations,delay,agent,photos,fitness)
-                np.savez("/its/home/drs25/Tactile_Language_Model/data/quadruped/"+str(i)+"_"+str(j)+"_"+str(k),history,allow_pickle=True)
+    for trials in range(10):
+        for i,sp in enumerate(speed):
+            for j,bo in enumerate(body):
+                for k,st in enumerate(stride):
+                    print(exture,trials,i,j,k)
+                    sp(agent)
+                    bo(env)
+                    st(env)
+                    history=run(env,generations,delay,agent,photos,fitness)
+                    np.savez("/its/home/drs25/Tactile_Language_Model/data/quadruped/"+exture+"_0.9_"+str(i)+"_"+str(j)+"_"+str(k)+"_t"+str(trials),history,allow_pickle=True)
 
     return history
     
 
 if __name__=="__main__":
-    testAll()
+    testAll(exture="0")
+    testAll(exture="1")
+    testAll(exture="2")
     """models=["mistral","gemma3","gpt-oss","llama3.1"] #,"deepseek-r1"
     for model in models:
         for i in range(7):
             for j in range(10):
                 print("experiment",i)
                 hist=runExperiment(i,delay=0,fric=0.05,model=model)
-                np.savez("/its/home/drs25/Tactile_Language_Model/data/quadruped/"+model+"_hist_0.5_"+str(i)+"_"+str(j)+"_low",hist,allow_pickle=True)
+                np.savez("/its/home/drs25/Tactile_Language_Model/data/quadruped/"+model+"_hist_0.8_"+str(i)+"_"+str(j)+"_low",hist,allow_pickle=True)
                 hist=runExperiment(i,delay=0,control=True,fric=0.05,model=model)
-                np.savez("/its/home/drs25/Tactile_Language_Model/data/quadruped/"+model+"_control_0.5_"+str(i)+"_"+str(j)+"_low",hist,allow_pickle=True)"""
+                np.savez("/its/home/drs25/Tactile_Language_Model/data/quadruped/"+model+"_control_0.8_"+str(i)+"_"+str(j)+"_low",hist,allow_pickle=True)#"""
