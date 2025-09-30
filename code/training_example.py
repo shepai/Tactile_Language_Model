@@ -44,25 +44,27 @@ def apply_sobel_filter(images,blur_ksize=(3,3), blur_sigma=0):
     return np.array(sobel_images)
 indices = np.random.permutation(len(X))
 X = X[indices]
-y = [y[i] for i in indices]  # if y is a list; if it's np.array, just do y = y[indices]
+
 sample_amount=8000
 X=X[:sample_amount]
-y=y[:sample_amount]
+
 X_norm=(X-np.mean(X))/(np.std(X))
 X=apply_sobel_filter(X_norm)
 
+tlm = TLM()
+bos = tlm.tokenizer.bos_token
+eos = tlm.tokenizer.eos_token
 
+y = [bos + y[i] + eos for i in indices]
 # Now split
+y=y[:sample_amount]
 train_X = X[:len(X)//4]
 train_y = y[:len(y)//4]
 test_X  = X[len(X)//4:]
 test_y  = y[len(y)//4:]
 
-
-del y
-tlm = TLM()
-tlm.load("/its/home/drs25/Tactile_Language_Model/data/models/pretrained_json2")
-tlm.train(train_X,train_y,epochs=1000,save="/its/home/drs25/Tactile_Language_Model/data/models/transferlearning2")
+#tlm.load("/its/home/drs25/Tactile_Language_Model/data/models/pretrained_json")
+tlm.train(train_X,train_y,epochs=1000,save="/its/home/drs25/Tactile_Language_Model/data/models/newembedding") #pretrained_json
 #tlm.save("/its/home/drs25/Tactile_Language_Model/data/gelsight_model_10")
 image=X[0].reshape((1,1,*X[0].shape))
 print(image.shape)

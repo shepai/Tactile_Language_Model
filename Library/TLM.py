@@ -41,14 +41,33 @@ class TactileDataset(Dataset):
             "input_ids": tokens["input_ids"].squeeze(0),
             "attention_mask": tokens["attention_mask"].squeeze(0)
         }
+class SimpleTactileCNN(nn.Module):
+    def __init__(self, out_dim=512):
+        super().__init__()
+        self.conv = nn.Sequential(
+            nn.Conv2d(1, 32, 5, stride=2, padding=2),  # (B, 32, H/2, W/2)
+            nn.ReLU(),
+            nn.MaxPool2d(2),                           # (B, 32, H/4, W/4)
+
+            nn.Conv2d(32, 64, 3, stride=1, padding=1), # (B, 64, H/4, W/4)
+            nn.ReLU(),
+            nn.MaxPool2d(2),                           # (B, 64, H/8, W/8)
+
+            nn.Conv2d(64, 128, 3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.AdaptiveAvgPool2d((1, 1))               # (B, 128, 1, 1)
+        )
+        self.fc = nn.Linear(128, out_dim)
+
+    def forward(self, x):
+        x = self.conv(x)
+        x = x.view(x.size(0), -1)  # flatten
+        return self.fc(x)          # (B, out_dim)
 class TactileCaptioningModel(nn.Module):
     def __init__(self, vocab_size, embed_dim=256, hidden_dim=512, max_len=30):
         super().__init__()
         # Image encoder: ResNet18 without classifier
-        resnet = models.resnet18(pretrained=True)
-        resnet.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
-        resnet.fc = nn.Identity()
-        self.encoder = resnet
+        self.encoder = SimpleTactileCNN(out_dim=512)
 
         # Project image features
         self.img_proj = nn.Linear(512, embed_dim)
@@ -76,43 +95,67 @@ class TactileCaptioningModel(nn.Module):
         return self.output_layer(out)
 class TLM:
     def __init__(self):
-        self.tokenizer=AutoTokenizer.from_pretrained("t5-small")
-        self.model = TactileCaptioningModel(vocab_size=self.tokenizer.vocab_size)
-    def train(self,X,y,epochs=100,save="",lr=1e-4):
+        self.tokenizer = AutoTokenizer.from_pretrained("Salesforce/codegen-350M-multi")
+        special_tokens_dict = {
+            "bos_token": "<BOS>",
+            "eos_token": "<EOS>",
+            "pad_token": "<PAD>"
+        }
+        self.tokenizer.add_special_tokens(special_tokens_dict)
+
+        # Recreate the model with updated vocab size
+        self.vocab_size = len(self.tokenizer)
+        self.model = TactileCaptioningModel(vocab_size=self.vocab_size)
+        #self.model = TactileCaptioningModel(vocab_size=self.tokenizer.vocab_size)
+    def train(self, X, y, epochs=100, save="", lr=1e-4):
         """
         Pass in the X data (images) and y data (string of descriptions)
-        Train the LLM
+        Train the captioning model
         """
-        X=torch.tensor(X).reshape(X.shape[0],1,X.shape[1],X.shape[2]).float()
-        #convert text to embeddings
-        """text = y
-        tokenized = tokenizer(text, padding="max_length", truncation=True, return_tensors="pt")
-        input_ids=tokenized['input_ids']
-        decoded=tokenizer.decode(input_ids[0].squeeze(), skip_special_tokens=True)
-        y=decoded"""
-        #train model
-        
+        if not isinstance(X, torch.Tensor):
+            X = torch.as_tensor(X, dtype=torch.float32)
+        X = X.reshape(X.shape[0], 1, X.shape[1], X.shape[2])
+
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model.to(device)
+
         optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
-        loss_fn = nn.CrossEntropyLoss(ignore_index=self.tokenizer.pad_token_id)
+        loss_fn = nn.CrossEntropyLoss(
+            label_smoothing=0.1,
+            ignore_index=self.tokenizer.pad_token_id
+        )
+
         dataset = TactileDataset(X, y, self.tokenizer)
         dataloader = DataLoader(dataset, batch_size=16, shuffle=True)
-        for epoch in range(epochs): #train loop
+        print("Tokenizer size:", len(self.tokenizer))
+        print("Embedding size:", self.model.embedding.num_embeddings)
+        for epoch in range(epochs):
             self.model.train()
             total_loss = 0
+
             for batch in dataloader:
                 images = batch["image"].to(device)
                 input_ids = batch["input_ids"].to(device)
                 outputs = self.model(images, input_ids[:, :-1])
-                loss = loss_fn(outputs.reshape(-1, self.tokenizer.vocab_size), input_ids[:, 1:].reshape(-1))
+                
+                loss = loss_fn(
+                    outputs.reshape(-1, self.vocab_size),
+                    input_ids[:, 1:].reshape(-1)
+                )
+
                 optimizer.zero_grad()
                 loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
                 optimizer.step()
+
                 total_loss += loss.item()
-            if save!="":
-                self.save(save)
-            print(f"Epoch {epoch}: Loss = {total_loss / len(dataloader):.4f}")
+
+            avg_loss = total_loss / len(dataloader)
+            print(f"Epoch {epoch}: Loss = {avg_loss:.4f}")
+
+            if save:
+                self.save(f"{save}")
+
     def generate_caption(self, image, max_len=300, device='cuda'):
         self.model.to(device)
         self.model.eval()
@@ -196,7 +239,7 @@ class TLM:
 
     def load(self, filename):
         # Create model instance with correct vocab size
-        self.model = TactileCaptioningModel(vocab_size=self.tokenizer.vocab_size)
+        self.model = TactileCaptioningModel(vocab_size=self.vocab_size)
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model.to(device)
 

@@ -79,21 +79,23 @@ X = X[indices]
 y = [y[i] for i in indices]  # if y is a list; if it's np.array, just do y = y[indices]
 sample_amount=8000
 X=X[:sample_amount]
-y=y[:sample_amount]
+
 X_norm=(X-np.mean(X))/(np.std(X))
 X=apply_sobel_filter(X_norm)
 
 
+del y
+tlm = TLM()
+bos = tlm.tokenizer.bos_token
+eos = tlm.tokenizer.eos_token
+y = [bos + y[i] + eos for i in indices]
+y=y[:sample_amount]
 # Now split
 train_X = X[:len(X)//4]
 train_y = y[:len(y)//4]
 test_X  = X[len(X)//4:]
 test_y  = y[len(y)//4:]
-
-
-del y
-tlm = TLM()
-tlm.train(train_X,train_y,epochs=5000,save="/its/home/drs25/Tactile_Language_Model/data/models/pretrained_json2")
+tlm.train(train_X,train_y,epochs=5000,save="/its/home/drs25/Tactile_Language_Model/data/models/pretrained_json")
 #tlm.save("/its/home/drs25/Tactile_Language_Model/data/gelsight_model_10")
 image=X[0].reshape((1,1,*X[0].shape))
 print(image.shape)
